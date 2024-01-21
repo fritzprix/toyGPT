@@ -177,6 +177,7 @@ class WikiSourceDataModule(L.LightningDataModule):
         self.dataset = None
         self.val_dataset = None
         self.train_dataset = None
+        self.cache_root= cache_root_path
         self.local_fdata_cache_path = os.path.join(cache_root_path, f'{self.name}/local_dscache')
         self.local_tdata_cache_path = os.path.join(cache_root_path, f'{self.name}/train_dscache')
         self.local_vdata_cache_path = os.path.join(cache_root_path, f'{self.name}/val_dscache')
@@ -198,7 +199,7 @@ class WikiSourceDataModule(L.LightningDataModule):
         if not os.path.exists(self.local_fdata_cache_path):
 
             sentence_chunker = SentenceChunker(self.tokenizer, self.max_length - 2)
-            datasets = [load_dataset('wikimedia/wikisource', f"20231201.{lang}")["train"].map(lambda b: sentence_chunker(b["text"]), batched=True, num_proc=self.num_proc).flatten() for lang in self.languages]
+            datasets = [load_dataset('wikimedia/wikisource', f"20231201.{lang}", cache_dir=self.cache_root)["train"].map(lambda b: sentence_chunker(b["text"]), batched=True, num_proc=self.num_proc).flatten() for lang in self.languages]
             full_dataset = Dataset.from_generator(SuccessCaseGenerator(datasets, transform=transform))
             full_dataset = full_dataset.train_test_split(test_size=(1 - self.train_size), train_size=self.train_size)
             full_dataset.save_to_disk(self.local_fdata_cache_path)
@@ -277,6 +278,7 @@ class RedPajamaDataModule(L.LightningDataModule):
         self.dataset = None
         self.val_dataset = None
         self.train_dataset = None
+        self.cache_root = cache_root_path
         self.local_fdata_cache_path = os.path.join(cache_root_path, f'{self.name}/local_dscache')
         self.local_tdata_cache_path = os.path.join(cache_root_path, f'{self.name}/train_dscache')
         self.local_vdata_cache_path = os.path.join(cache_root_path, f'{self.name}/val_dscache')
@@ -298,7 +300,7 @@ class RedPajamaDataModule(L.LightningDataModule):
         if not os.path.exists(self.local_fdata_cache_path):
 
             sentence_chunker = SentenceChunker(self.tokenizer, self.max_length - 2)
-            datasets = [load_dataset("togethercomputer/RedPajama-Data-1T", subset)["train"].map(lambda b: sentence_chunker(b["text"]), batched=True, num_proc=self.num_proc).flatten() for subset in self.subsets]
+            datasets = [load_dataset("togethercomputer/RedPajama-Data-1T", subset, cache_dir=self.cache_root)["train"].map(lambda b: sentence_chunker(b["text"]), batched=True, num_proc=self.num_proc).flatten() for subset in self.subsets]
             full_dataset = Dataset.from_generator(SuccessCaseGenerator(datasets, transform=transform))
             full_dataset = full_dataset.train_test_split(test_size=(1 - self.train_size), train_size=self.train_size)
             full_dataset.save_to_disk(self.local_fdata_cache_path)
@@ -374,6 +376,7 @@ class RedPajamaDataSampleModule(L.LightningDataModule):
         self.dataset = None
         self.val_dataset = None
         self.train_dataset = None
+        self.cache_root = cache_root_path
         self.local_fdata_cache_path = os.path.join(cache_root_path, f'{self.name}/local_dscache')
         self.local_tdata_cache_path = os.path.join(cache_root_path, f'{self.name}/train_dscache')
         self.local_vdata_cache_path = os.path.join(cache_root_path, f'{self.name}/val_dscache')
@@ -394,7 +397,7 @@ class RedPajamaDataSampleModule(L.LightningDataModule):
         if not os.path.exists(self.local_fdata_cache_path):
 
             sentence_chunker = SentenceChunker(self.tokenizer, self.max_length - 2)
-            datasets = [load_dataset("togethercomputer/RedPajama-Data-1T-Sample")["train"].map(lambda b: sentence_chunker(b["text"]), batched=True, num_proc=self.num_proc).flatten()]
+            datasets = [load_dataset("togethercomputer/RedPajama-Data-1T-Sample", cache_dir=self.cache_root)["train"].map(lambda b: sentence_chunker(b["text"]), batched=True, num_proc=self.num_proc).flatten()]
             full_dataset = Dataset.from_generator(SuccessCaseGenerator(datasets, transform=transform))
             full_dataset = full_dataset.train_test_split(test_size=(1 - self.train_size), train_size=self.train_size)
             full_dataset.save_to_disk(self.local_fdata_cache_path)
@@ -474,6 +477,7 @@ class HuggingFaceCollectionModule(L.LightningDataModule):
         self.dataset = None
         self.val_dataset = None
         self.train_dataset = None
+        self.cache_root = cache_root_path
         self.local_fdata_cache_path = os.path.join(cache_root_path, f'{self.name}/local_dscache')
         self.local_tdata_cache_path = os.path.join(cache_root_path, f'{self.name}/train_dscache')
         self.local_vdata_cache_path = os.path.join(cache_root_path, f'{self.name}/val_dscache')
@@ -495,7 +499,7 @@ class HuggingFaceCollectionModule(L.LightningDataModule):
         if not os.path.exists(self.local_fdata_cache_path):
 
             sentence_chunker = SentenceChunker(self.tokenizer, self.max_length - 2)
-            datasets = [load_dataset(path, subset)['train'].map(lambda b: sentence_chunker(b["text"]), batched=True, num_proc=self.num_proc).flatten()
+            datasets = [load_dataset(path, subset, cache_dir=self.cache_root)['train'].map(lambda b: sentence_chunker(b["text"]), batched=True, num_proc=self.num_proc).flatten()
              for i, path in enumerate(self.paths) for subset in self.subsets[i]]
                 
             full_dataset = Dataset.from_generator(SuccessCaseGenerator(datasets, transform=transform))

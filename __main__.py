@@ -73,20 +73,12 @@ def train(args):
     # initialize wandb
     if args.wnb:
         wandb.login()
-        wandb.init(project="toygpt", config={
+        wandb.init(project="toygpt2", config={
             "batch_size": args.batch,
             "learning_rate": args.lr,
             **config
         })
-
-    if args.wnb:
-        wandb.login()
-        wandb.init(project="toygpt", config={
-            "batch_size": args.batch,
-            "learning_rate": args.lr,
-            **config
-        })
-        logger = WandbLogger(name='toygpt',version='0.1.0',log_model="all")
+        logger = WandbLogger(name='toygpt', version='0.1.0', log_model="all")
     else:
         logger = TensorBoardLogger('tf_logs')
     # 
@@ -100,10 +92,11 @@ def train(args):
     vocab_size = len(tokenizer)
 
     data_module = HuggingFaceCollectionModule(tokenizer, 
-                                              paths=['wikimedia/wikisource', "togethercomputer/RedPajama-Data-1T-Sample"],
+                                              paths=["wikimedia/wikisource", 
+                                                     "togethercomputer/RedPajama-Data-1T"],
                                               subsets=[
-                                                  ['20231201.en'],
-                                                  [None]
+                                                  ["20231201.en"],
+                                                  ["book"]
                                               ],
                                               cache_root_path=args.cache,
                                               max_length=config['block_size'], 
@@ -146,7 +139,7 @@ def resume(args):
     block_size = model.hparams['block_size']
     if args.wnb:
         wandb.login()
-        wandb.init(project="toygpt", config={
+        wandb.init(project="toygpt2", config={
             "step_offse": step_offset,
             **model.hparams
         })
