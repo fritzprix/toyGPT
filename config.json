@@ -1,0 +1,1 @@
+[{"name": "toyGPT.small", "n_layer": 12, "n_head": 8, "block_size": 512, "n_embed": 768}, {"name": "toyGPT.midium", "n_layer": 16, "n_head": 8, "block_size": 512, "n_embed": 1024}, {"name": "toyGPT.large", "n_layer": 24, "n_head": 16, "block_size": 512, "n_embed": 2048}]
