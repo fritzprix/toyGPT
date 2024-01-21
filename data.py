@@ -162,6 +162,7 @@ class WikiSourceDataModule(L.LightningDataModule):
                  languages:List[str]=['en'], 
                  train_size:float=0.9,
                  resume_pos = 0,
+                 cache_root_path:str='cache',
                  num_proc=15) -> None:
         super().__init__()
         self.name = 'wikisource'
@@ -176,10 +177,10 @@ class WikiSourceDataModule(L.LightningDataModule):
         self.dataset = None
         self.val_dataset = None
         self.train_dataset = None
-        self.local_fdata_cache_path = f'cache/{self.name}/local_dscache'
-        self.local_tdata_cache_path = f'cache/{self.name}/train_dscache'
-        self.local_vdata_cache_path = f'cache/{self.name}/val_dscache'
-        self.local_tokenized_cache_path = f'cache/{self.name}/tokenized'
+        self.local_fdata_cache_path = os.path.join(cache_root_path, f'{self.name}/local_dscache')
+        self.local_tdata_cache_path = os.path.join(cache_root_path, f'{self.name}/train_dscache')
+        self.local_vdata_cache_path = os.path.join(cache_root_path, f'{self.name}/val_dscache')
+        self.local_tokenized_cache_path = os.path.join(cache_root_path, f'{self.name}/tokenized')
 
     
     def prepare_data(self) -> None:
@@ -236,7 +237,9 @@ class WikiSourceDataModule(L.LightningDataModule):
         else:
             train_dataset = self.train_dataset.map(self._tokenize, batched=True, batch_size=self.batch_size).select_columns(["input_ids", "attention_mask"])
             train_dataset.save_to_disk(self.local_tokenized_cache_path)
-        train_dataset = train_dataset[self.batch_size * self.resume_pos:]
+        l = len(train_dataset)
+        print(range(self.batch_size * self.resume_pos, l))
+        train_dataset = train_dataset.select(range(self.batch_size * self.resume_pos, l))
         return data.DataLoader(train_dataset.with_format(type="torch"), num_workers=self.num_proc, batch_size=self.batch_size)
     
     def val_dataloader(self) -> EVAL_DATALOADERS:
@@ -259,6 +262,7 @@ class RedPajamaDataModule(L.LightningDataModule):
                  subsets:List[str]=['book'], 
                  train_size:float=0.9,
                  resume_pos = 0,
+                 cache_root_path:str='cache',
                  num_proc=15) -> None:
         super().__init__()
         self.name = 'redpajama-1T'
@@ -273,10 +277,10 @@ class RedPajamaDataModule(L.LightningDataModule):
         self.dataset = None
         self.val_dataset = None
         self.train_dataset = None
-        self.local_fdata_cache_path = f'cache/{self.name}/local_dscache'
-        self.local_tdata_cache_path = f'cache/{self.name}/train_dscache'
-        self.local_vdata_cache_path = f'cache/{self.name}/val_dscache'
-        self.local_tokenized_cache_path = f'cache/{self.name}/tokenized'
+        self.local_fdata_cache_path = os.path.join(cache_root_path, f'{self.name}/local_dscache')
+        self.local_tdata_cache_path = os.path.join(cache_root_path, f'{self.name}/train_dscache')
+        self.local_vdata_cache_path = os.path.join(cache_root_path, f'{self.name}/val_dscache')
+        self.local_tokenized_cache_path = os.path.join(cache_root_path, f'{self.name}/tokenized')
 
 
     def prepare_data(self) -> None:
@@ -348,7 +352,6 @@ class RedPajamaDataModule(L.LightningDataModule):
     
 
 
-
 class RedPajamaDataSampleModule(L.LightningDataModule):
 
     def __init__(self, tokenizer: PreTrainedTokenizer, 
@@ -357,6 +360,7 @@ class RedPajamaDataSampleModule(L.LightningDataModule):
                  clear_cache:bool=False,
                  train_size:float=0.9,
                  resume_pos = 0,
+                 cache_root_path:str='cache',
                  num_proc=15) -> None:
         super().__init__()
         self.name = 'redpajama-1T-sample'
@@ -370,10 +374,10 @@ class RedPajamaDataSampleModule(L.LightningDataModule):
         self.dataset = None
         self.val_dataset = None
         self.train_dataset = None
-        self.local_fdata_cache_path = f'cache/{self.name}/local_dscache'
-        self.local_tdata_cache_path = f'cache/{self.name}/train_dscache'
-        self.local_vdata_cache_path = f'cache/{self.name}/val_dscache'
-        self.local_tokenized_cache_path = f'cache/{self.name}/tokenized'
+        self.local_fdata_cache_path = os.path.join(cache_root_path, f'{self.name}/local_dscache')
+        self.local_tdata_cache_path = os.path.join(cache_root_path, f'{self.name}/train_dscache')
+        self.local_vdata_cache_path = os.path.join(cache_root_path, f'{self.name}/val_dscache')
+        self.local_tokenized_cache_path = os.path.join(cache_root_path, f'{self.name}/tokenized')
 
     def prepare_data(self) -> None:
 
@@ -454,6 +458,7 @@ class HuggingFaceCollectionModule(L.LightningDataModule):
                  clear_cache:bool=False,
                  train_size:float=0.9,
                  resume_pos = 0,
+                 cache_root_path:str='cache',
                  num_proc=15) -> None:
         super().__init__()
         self.name = '_'.join(paths)
@@ -469,10 +474,10 @@ class HuggingFaceCollectionModule(L.LightningDataModule):
         self.dataset = None
         self.val_dataset = None
         self.train_dataset = None
-        self.local_fdata_cache_path = f'cache/{self.name}/local_dscache'
-        self.local_tdata_cache_path = f'cache/{self.name}/train_dscache'
-        self.local_vdata_cache_path = f'cache/{self.name}/val_dscache'
-        self.local_tokenized_cache_path = f'cache/{self.name}/tokenized'
+        self.local_fdata_cache_path = os.path.join(cache_root_path, f'{self.name}/local_dscache')
+        self.local_tdata_cache_path = os.path.join(cache_root_path, f'{self.name}/train_dscache')
+        self.local_vdata_cache_path = os.path.join(cache_root_path, f'{self.name}/val_dscache')
+        self.local_tokenized_cache_path = os.path.join(cache_root_path, f'{self.name}/tokenized')
 
 
     def prepare_data(self) -> None:

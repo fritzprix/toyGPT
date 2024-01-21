@@ -105,6 +105,7 @@ def train(args):
                                                   ['20231201.en'],
                                                   [None]
                                               ],
+                                              cache_root_path=args.cache,
                                               max_length=config['block_size'], 
                                               batch_size=args.batch, 
                                               num_proc=15, 
@@ -167,6 +168,7 @@ def resume(args):
                                                   ['20231201.en'],
                                                   [None]
                                               ],
+                                              cache_root_path=args.cache,
                                               max_length=block_size, 
                                               batch_size=batch_size, 
                                               resume_pos=step_offset,
@@ -230,12 +232,14 @@ if __name__ == '__main__':
     train_parser.add_argument('-d', '--wd', type=float, default=0.1, help='weight decay for Adam optimizer')
     train_parser.add_argument('-p', '--precision', type=str, default='32-true', help='training precision option')
     train_parser.add_argument('-w', '--wnb', type=bool, default=False, help='wandb logging')
+    train_parser.add_argument('-x', '--cache', type=str, default='cache', help='cache directory')
 
     resume_parser = sub_parser.add_parser('resume', help='resume training')
     resume_parser.add_argument('-i', '--ckpt', required=False, default=None)
     resume_parser.add_argument('-c', '--config', type=str, default='config.json', help='configuration file for training')
     resume_parser.add_argument('-w', '--wnb', type=bool, default=False, help='wandb logging')
     resume_parser.add_argument('-p', '--precision', type=str, default='32-true', help='training precision option')
+    resume_parser.add_argument('-x', '--cache', type=str, default='cache', help='cache directory')
     resume_parser.set_defaults(func=resume)
 
     generate_parser = sub_parser.add_parser("generate", help='generate text using model')
