@@ -16,16 +16,15 @@ class ScaledDotProductAttention(torch.nn.Module):
     def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         # Calculate the dot product of q and k, then scale it by the square root of the dimensionality of the keys.
         scaled_qk: torch.Tensor = q @ k.transpose(2, 1) * (1 / math.sqrt(k.size(-1)))
-        
         # If a mask is provided (e.g., for padding or future blinding), apply it to the scaled dot product.
         if mask is not None:
-            scaled_qk = scaled_qk.masked_fill(mask.bitwise_not(), float('-inf'))
+            scaled_qk = scaled_qk.masked_fill(mask.bool().bitwise_not(), float('-inf'))
         
         # Apply softmax to get the attention weights, then multiply with the values.
         attention_weights = torch.softmax(scaled_qk, dim=-1)
         return attention_weights @ v
 
-class MultiHeadAttentionV3(torch.nn.Module):
+class MultiHeadAttentionFA(torch.nn.Module):
 
     def __init__(self, d_model:int, n_head:int, device=None, dtype: torch.dtype=torch.float32, dropout:float=0.2, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -59,7 +58,7 @@ class MultiHeadAttentionV3(torch.nn.Module):
 
         return self.out_dropout(self.out_linear(sdp_out.transpose(1,2).view(B, n_seq, C)))
 
-class MultiHeadAttentionV2(torch.nn.Module):
+class MultiHeadAttention(torch.nn.Module):
 
     def __init__(self, d_model:int, n_head:int, device=None, dtype: torch.dtype=torch.float32, dropout:float=0.2, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -99,7 +98,7 @@ class MultiHeadAttentionV2(torch.nn.Module):
 
 
 
-class MultiHeadAttentionV1(torch.nn.Module):
+class MultiHeadAttentionNaive(torch.nn.Module):
 
     def __init__(self, d_model:int, n_head:int, device=None, dtype: torch.dtype=torch.float32, dropout:float=0.2, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -133,9 +132,9 @@ class MultiHeadAttentionV1(torch.nn.Module):
         # now Q,K,V have shape of (batch_size, seq_n, n_head, d_head)
 
 
-        attn_output = torch.concat([self.attns[i].forward(q[:,i,:,:].unsqueeze(1), 
-                                            k[:,i,:,:].unsqueeze(1), 
-                                            v[:,i,:,:].unsqueeze(1),mask=mask) for i in range(self.n_head)],dim=-1)
+        attn_output = torch.concat([self.attns[i].forward(q[:,i,:,:].squeeze(1), 
+                                            k[:,i,:,:].squeeze(1), 
+                                            v[:,i,:,:].squeeze(1),mask=mask) for i in range(self.n_head)],dim=-1)
         
         return self.out_drop(self.output_linear(attn_output))
         
@@ -156,14 +155,14 @@ class PositionWiseFeedforward(torch.nn.Module):
 
 # The Transformer class defines a single Transformer block, which is composed of a multi-head attention layer
 # followed by a position-wise feedforward network.
-class Transformer(torch.nn.Module):
+class TransformerFA(torch.nn.Module):
     # Initialization of the Transformer block with normalization layers, multi-head attention, and feedforward network.
     def __init__(self, n_head, d_model, device, dtype:torch.dtype=torch.float32,dropout:float=0.2, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         # Normalization layer applied to the input.
         self.input_norm = torch.nn.LayerNorm(d_model, device=device, dtype=dtype)
         # Multi-head attention layer.
-        self.mha = MultiHeadAttentionV3(d_model=d_model, n_head=n_head, device=device, dtype=dtype, dropout=dropout)
+        self.mha = MultiHeadAttentionFA(d_model=d_model, n_head=n_head, device=device, dtype=dtype, dropout=dropout)
         # Normalization layer applied after the attention layer.
         self.mha_lnorm = torch.nn.LayerNorm(d_model, device=device,dtype=dtype)
         # Position-wise feedforward network.
@@ -196,12 +195,12 @@ def positional_embedding(d_model, max_length, dtype=None, device=None):
         return pe.requires_grad_(False)
 
 
-class TransformerV0(torch.nn.Module):
+class TransformerNaive(torch.nn.Module):
 
     def __init__(self, n_head, d_model, device, dtype:torch.dtype=torch.float32,dropout:float=0.2, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.input_norm = torch.nn.LayerNorm(d_model, device=device, dtype=dtype)
-        self.mha = MultiHeadAttentionV1(d_model=d_model, n_head=n_head, device=device, dtype=dtype, dropout=dropout)
+        self.mha = MultiHeadAttentionNaive(d_model=d_model, n_head=n_head, device=device, dtype=dtype, dropout=dropout)
         self.mha_lnorm = torch.nn.LayerNorm(d_model, device=device,dtype=dtype)
         self.pw_ff = PositionWiseFeedforward(d_model=d_model, device=device, dtype=dtype, dropout=dropout)
         self.residual_dropout = torch.nn.Dropout(dropout)
@@ -255,7 +254,7 @@ class ToyGPT(L.LightningModule):
         # Define the dropout layer for embeddings.
         self.embedding_dropout = torch.nn.Dropout(p_dropout)
         # Stack the Transformer blocks to create the model.
-        self.transformers = torch.nn.Sequential(*[Transformer(n_head=n_head, d_model=n_embed, device=device, dtype=dtype, dropout=p_dropout) for _ in range(n_layer)])
+        self.transformers = torch.nn.Sequential(*[TransformerFA(n_head=n_head, d_model=n_embed, device=device, dtype=dtype, dropout=p_dropout) for _ in range(n_layer)])
         # Define the loss function, ignoring the padding index in the loss calculation.
         self.loss = torch.nn.CrossEntropyLoss(ignore_index=pad_id)
         self.lr = lr
@@ -303,17 +302,14 @@ class ToyGPT(L.LightningModule):
 
     def training_step(self, data: Tuple[torch.Tensor], batch_index:Any, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
         
-        X = data["input_ids"]
+        input: torch.Tensor = data["input"]
+        target: torch.Tensor = data["target"]
+        attention_mask: torch.Tensor = data["attention_mask"]
 
-        input:torch.Tensor = X[:,:-1]
-        target:torch.Tensor = X[:,1:].long()
-        B,n = input.shape
 
-        attention_mask:torch.Tensor = torch.tril(torch.ones((n,n), device=input.device)).unsqueeze(0).expand((B,n,n)).bool()
-        
+        seq_n = input.size(1)
 
-        # X_wemb = self.embedding(input) + self.pos_embedding(torch.arange(0, input.shape[-1],device=input.device, dtype=torch.long)) # word embedding + postion embedding
-        X_wemb = self.embedding(input) + self.pos_embedding[:,:n,:] # word embedding + postion embedding
+        X_wemb = self.embedding(input) + self.pos_embedding[:,:seq_n,:] # word embedding + postion embedding
         hidden_output, _ = self.transformers.forward((self.embedding_dropout(X_wemb), attention_mask))
         logits = self.output_linear.forward(hidden_output)
         # the sequencess of batch are now totally flatten into (B * n, logits), so we have to divide the loss by batch_size
@@ -329,37 +325,34 @@ class ToyGPT(L.LightningModule):
 
     def validation_step(self, data: Tuple[torch.Tensor], batch_index,*args: Any, **kwargs: Any) -> STEP_OUTPUT:
         
-        X = data["input_ids"]
+        input: torch.Tensor = data["input"]
+        target: torch.Tensor = data["target"].long()
+        attention_mask: torch.Tensor = data["attention_mask"]
 
-        input:torch.Tensor = X[:,:-1]
-        target:torch.Tensor = X[:,1:].long()
-        B,n = input.shape
 
-        attention_mask:torch.Tensor = torch.tril(torch.ones((n,n), device=input.device)).unsqueeze(0).expand((B,n,n)).bool()
+        seq_n = input.size(1)
 
-        X_wemb = self.embedding(input) + self.pos_embedding[:,:n,:] # word embedding + postion embedding
+        X_wemb = self.embedding(input) + self.pos_embedding[:,:seq_n,:] # word embedding + postion embedding
         hidden_output, _ = self.transformers.forward((self.embedding_dropout(X_wemb), attention_mask))
-
         logits = self.output_linear.forward(hidden_output)
         # the sequencess of batch are now totally flatten into (B * n, logits), so we have to divide the loss by batch_size
         loss = self.loss(logits.view(-1, logits.size(-1)), target.reshape(-1))
+
         self.log("val_loss", loss)
         return {"batch_index": batch_index, "val_loss":loss}
     
     
     def test_step(self, data: Tuple[torch.Tensor], batch_index, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
        
-        X = data["input_ids"]
+        
+        input: torch.Tensor = data["input"]
+        target: torch.Tensor = data["target"].long()
+        attention_mask: torch.Tensor = data["attention_mask"]
 
-        input:torch.Tensor = X[:,:-1]
-        target:torch.Tensor = X[:,1:].long()
-        B,n = input.shape
+        seq_n = input.size(1)
 
-        attention_mask:torch.Tensor = torch.tril(torch.ones((n,n), device=input.device)).unsqueeze(0).expand((B,n,n)).bool()
-
-        X_wemb = self.embedding(input) + self.pos_embedding[:,:n,:] # word embedding + postion embedding
+        X_wemb = self.embedding(input) + self.pos_embedding[:,:seq_n,:] # word embedding + postion embedding
         hidden_output, _ = self.transformers.forward((self.embedding_dropout(X_wemb), attention_mask))
-
         logits = self.output_linear.forward(hidden_output)
         # the sequencess of batch are now totally flatten into (B * n, logits), so we have to divide the loss by batch_size
         loss = self.loss(logits.view(-1, logits.size(-1)), target.reshape(-1))
@@ -367,7 +360,6 @@ class ToyGPT(L.LightningModule):
 
         return {"batch_index": batch_index, "val_loss":loss}
     
-
 
 
 class ToyGPTV0(L.LightningModule):
@@ -401,13 +393,11 @@ class ToyGPTV0(L.LightningModule):
 
         self.pos_embedding = positional_embedding(d_model=n_embed, max_length=block_size, device=device, dtype=dtype).unsqueeze(0)
         self.embedding_dropout = torch.nn.Dropout(p_dropout)
-        self.transformers = torch.nn.Sequential(*[TransformerV0(n_head=n_head, d_model=n_embed, device=device, dtype=dtype, dropout=p_dropout) for _ in range(n_layer)])
+        self.transformers = torch.nn.Sequential(*[TransformerFA(n_head=n_head, d_model=n_embed, device=device, dtype=dtype, dropout=p_dropout) for _ in range(n_layer)])
         self.loss = torch.nn.CrossEntropyLoss(ignore_index=pad_id)
         self.apply(self._init_weights)
 
     
-    
-
     def _init_weights(self, module):
         if isinstance(module, torch.nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
@@ -445,17 +435,14 @@ class ToyGPTV0(L.LightningModule):
 
     def training_step(self, data: Tuple[torch.Tensor], batch_index:Any, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
         
-        X = data["input_ids"]
+        input: torch.Tensor = data["input"]
+        target: torch.Tensor = data["target"]
+        attention_mask: torch.Tensor = data["attention_mask"]
 
-        input:torch.Tensor = X[:,:-1]
-        target:torch.Tensor = X[:,1:].long()
-        B,n = input.shape
 
-        attention_mask:torch.Tensor = torch.tril(torch.ones((n,n), device=input.device)).unsqueeze(0).expand((B,n,n)).bool()
-        
+        seq_n = input.size(1)
 
-        # X_wemb = self.embedding(input) + self.pos_embedding(torch.arange(0, input.shape[-1],device=input.device, dtype=torch.long)) # word embedding + postion embedding
-        X_wemb = self.embedding(input) + self.pos_embedding[:,:n,:] # word embedding + postion embedding
+        X_wemb = self.embedding(input) + self.pos_embedding[:,:seq_n,:] # word embedding + postion embedding
         hidden_output, _ = self.transformers.forward((self.embedding_dropout(X_wemb), attention_mask))
         logits = self.output_linear.forward(hidden_output)
         # the sequencess of batch are now totally flatten into (B * n, logits), so we have to divide the loss by batch_size
@@ -471,37 +458,34 @@ class ToyGPTV0(L.LightningModule):
 
     def validation_step(self, data: Tuple[torch.Tensor], batch_index,*args: Any, **kwargs: Any) -> STEP_OUTPUT:
         
-        X = data["input_ids"]
+        input: torch.Tensor = data["input"]
+        target: torch.Tensor = data["target"].long()
+        attention_mask: torch.Tensor = data["attention_mask"]
 
-        input:torch.Tensor = X[:,:-1]
-        target:torch.Tensor = X[:,1:].long()
-        B,n = input.shape
 
-        attention_mask:torch.Tensor = torch.tril(torch.ones((n,n), device=input.device)).unsqueeze(0).expand((B,n,n)).bool()
+        seq_n = input.size(1)
 
-        X_wemb = self.embedding(input) + self.pos_embedding[:,:n,:] # word embedding + postion embedding
+        X_wemb = self.embedding(input) + self.pos_embedding[:,:seq_n,:] # word embedding + postion embedding
         hidden_output, _ = self.transformers.forward((self.embedding_dropout(X_wemb), attention_mask))
-
         logits = self.output_linear.forward(hidden_output)
         # the sequencess of batch are now totally flatten into (B * n, logits), so we have to divide the loss by batch_size
         loss = self.loss(logits.view(-1, logits.size(-1)), target.reshape(-1))
+
         self.log("val_loss", loss)
         return {"batch_index": batch_index, "val_loss":loss}
     
     
     def test_step(self, data: Tuple[torch.Tensor], batch_index, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
        
-        X = data["input_ids"]
+        
+        input: torch.Tensor = data["input"]
+        target: torch.Tensor = data["target"].long()
+        attention_mask: torch.Tensor = data["attention_mask"]
 
-        input:torch.Tensor = X[:,:-1]
-        target:torch.Tensor = X[:,1:].long()
-        B,n = input.shape
+        seq_n = input.size(1)
 
-        attention_mask:torch.Tensor = torch.tril(torch.ones((n,n), device=input.device)).unsqueeze(0).expand((B,n,n)).bool()
-
-        X_wemb = self.embedding(input) + self.pos_embedding[:,:n,:] # word embedding + postion embedding
+        X_wemb = self.embedding(input) + self.pos_embedding[:,:seq_n,:] # word embedding + postion embedding
         hidden_output, _ = self.transformers.forward((self.embedding_dropout(X_wemb), attention_mask))
-
         logits = self.output_linear.forward(hidden_output)
         # the sequencess of batch are now totally flatten into (B * n, logits), so we have to divide the loss by batch_size
         loss = self.loss(logits.view(-1, logits.size(-1)), target.reshape(-1))
