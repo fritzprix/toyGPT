@@ -36,7 +36,7 @@ For an in-depth look at the training process, experiment setups, and results, vi
 
 [ToyGPT Training Details on Weights & Biases](https://wandb.ai/dwidlee/toygpt/overview?workspace=user-dwidlee)
 
-||[checkpoint](dwidlee/toygpt/model-99cmyt9l:v29)|
+||[checkpoint](https://api.wandb.ai/artifactsV2/default/dwidlee/QXJ0aWZhY3Q6Njk4MDM1NzYx/0283f5ce94b5108b6ec93a0ad206f02a/model.ckpt?_gl=1*19b9pdv*_ga*ODkwMDMyMzIyLjE3MDM3NzA2MDA.*_ga_JH1SJHJQXJ*MTcwNzgzMzMyNS42Mi4xLjE3MDc4MzMzODkuNjAuMC4w)|
 |-|-|
 |train loss|4.505|
 |val. loss|4.548|
