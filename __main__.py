@@ -5,13 +5,15 @@ import torch
 import re
 from model import ToyGPT
 from data import HFCollectionMultiTaskDataModule
-from transformers import GPT2TokenizerFast,PreTrainedTokenizer
+from transformers import GPT2TokenizerFast,PreTrainedTokenizer, BertTokenizerFast
 import lightning as L
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from lightning.pytorch.callbacks.model_checkpoint import ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger, TensorBoardLogger
 import wandb
 import os
+
+DATASET_CONFIG_CACHE_PATH = '.datasets.json'
 
 def get_checkpoint_path(model_name:str):
     return os.path.join('checkpoints', model_name)
@@ -38,6 +40,8 @@ def get_tokenizer() -> PreTrainedTokenizer:
 
 def get_device() -> Any:
     # will use GPU whenever it's available
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
     return torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 
@@ -78,10 +82,15 @@ def train(args):
     configs = get_config(args.config)
     config = configs[0]
     torch.set_float32_matmul_precision('medium')
+
+
+    with open(args.src) as src, open(DATASET_CONFIG_CACHE_PATH, 'wt+') as dst:
+        dataset_configs = json.load(src)
+        json.dump(dataset_configs, dst)
     
+    assert dataset_configs is not None
 
     # initialize wandb
-
     if args.wnb:
         wandb.login()
         wandb.init(project="toygpt", config={
@@ -93,7 +102,6 @@ def train(args):
     else:
         logger = TensorBoardLogger('tf_logs')
     
-
     
     tokenizer: PreTrainedTokenizer = get_tokenizer()
     vocab_size = len(tokenizer)
@@ -101,13 +109,12 @@ def train(args):
     cpu_count = (os.cpu_count() - 1)
 
     dataset = HFCollectionMultiTaskDataModule(tokenizer, 
-                                            paths=['wikimedia/wikisource', "togethercomputer/RedPajama-Data-1T-Sample"],
+                                            paths=[dataset['name'] for dataset in dataset_configs],
                                             subsets=[
-                                                  ['20231201.en'],
-                                                  [None]
+                                                dataset['subset'] for dataset in dataset_configs
                                             ],
                                             columns=[
-                                                  'text','text'
+                                                dataset['column'] for dataset in dataset_configs
                                             ],
                                             tasks=['CLM'],
                                             cache_dir=args.cache,
@@ -138,16 +145,21 @@ def train(args):
 
 def process(args):
     config = get_config(args.config)
+
+    with open(args.src) as src:
+        dataset_configs = json.load(src)
+    
+    assert dataset_configs is not None
+
     tokenizer = get_tokenizer()
     cpu_count = (os.cpu_count() - 1)
     dataset = HFCollectionMultiTaskDataModule(tokenizer, 
-                                            paths=['wikimedia/wikisource', "togethercomputer/RedPajama-Data-1T-Sample"],
+                                            paths=[dataset['name'] for dataset in dataset_configs],
                                             subsets=[
-                                                  ['20231201.en'],
-                                                  [None]
+                                                dataset['subset'] for dataset in dataset_configs
                                             ],
                                             columns=[
-                                                  'text','text'
+                                                dataset['column'] for dataset in dataset_configs
                                             ],
                                             tasks=['CLM'],
                                             cache_dir=args.cache, 
@@ -167,7 +179,10 @@ def resume(args):
     last_ckpt_name = get_last_file(get_checkpoint_path(ToyGPT.__name__))
     step_offset = get_steps(last_ckpt_name)
     model = ToyGPT.load_from_checkpoint(last_ckpt_name, device=device)
-    
+
+    with open(DATASET_CONFIG_CACHE_PATH) as src:
+        dataset_configs = json.load(src)
+    assert dataset_configs is not None
     
     if args.wnb:
         wandb.init(project="toygpt")
@@ -184,16 +199,15 @@ def resume(args):
     
     print(f"resusmed state : {last_ckpt_name}  (steps: {step_offset})")
     print(f"hparam: \n {model.hparams})")
-
+    
     cpu_count = (os.cpu_count() - 1)
     dataset = HFCollectionMultiTaskDataModule(tokenizer, 
-                                            paths=['wikimedia/wikisource', "togethercomputer/RedPajama-Data-1T-Sample"],
+                                            paths=[dataset['name'] for dataset in dataset_configs],
                                             subsets=[
-                                                  ['20231201.en'],
-                                                  [None]
+                                                dataset['subset'] for dataset in dataset_configs
                                             ],
                                             columns=[
-                                                  'text','text'
+                                                dataset['column'] for dataset in dataset_configs
                                             ],
                                             tasks=['CLM'],
                                             cache_dir=args.cache, 
@@ -267,6 +281,7 @@ if __name__ == '__main__':
     train_parser.add_argument('-d', '--wd', type=float, default=0.1, help='weight decay for Adam optimizer')
     train_parser.add_argument('-p', '--precision', type=str, default='32-true', help='training precision option')
     train_parser.add_argument('-w', '--wnb', type=bool, default=False, help='wandb logging')
+    train_parser.add_argument('-s', '--src', type=str, default='datasets.json', help='dataset config file')
 
     resume_parser = sub_parser.add_parser('resume', help='resume training')
     resume_parser.add_argument('-i', '--ckpt', required=False, default=None)
@@ -286,6 +301,7 @@ if __name__ == '__main__':
     process_parser.add_argument('-c', '--config', type=str, default='config.json', help='configuration file for training')
     process_parser.add_argument('-b', '--batch', type=int, default=8, help='batch_size for data processing')
     process_parser.add_argument('-x', '--cache', type=str, help='path to store local training dataset')
+    process_parser.add_argument('-s', '--src', type=str, default='datasets.json', help='dataset config file')
     process_parser.set_defaults(func=process)
     
 

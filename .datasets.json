@@ -1,0 +1,1 @@
+[{"name": "wikimedia/wikisource", "subset": ["20231201.en"], "column": "text"}, {"name": "togethercomputer/RedPajama-Data-1T-Sample", "subset": [null], "column": "text"}, {"name": "wikimedia/wikipedia", "subset": ["20231101.en"], "column": "text"}]
