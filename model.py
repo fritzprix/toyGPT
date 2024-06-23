@@ -1,9 +1,11 @@
 from typing import Any, Tuple, Dict
+from transformers import PreTrainedModel
 from pydantic import BaseModel
 from lightning.pytorch.utilities.types import STEP_OUTPUT, OptimizerLRScheduler
 import torch
 import math
 import lightning as L
+from transformers.configuration_utils import PretrainedConfig
 
 # ScaledDotProductAttention is a fundamental component in Transformer architecture.
 # It computes attention weights and produces a weighted average of values (v).

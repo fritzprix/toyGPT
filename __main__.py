@@ -5,7 +5,7 @@ import torch
 import re
 from model import ToyGPT
 from data import HFCollectionMultiTaskDataModule
-from transformers import GPT2TokenizerFast,PreTrainedTokenizer, BertTokenizerFast
+from transformers import GPT2TokenizerFast,PreTrainedTokenizer
 import lightning as L
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from lightning.pytorch.callbacks.model_checkpoint import ModelCheckpoint
@@ -15,8 +15,8 @@ import os
 
 DATASET_CONFIG_CACHE_PATH = '.datasets.json'
 
-def get_checkpoint_path(model_name:str):
-    return os.path.join('checkpoints', model_name)
+def get_checkpoint_path(model_name:str, tasks:List[str]):
+    return os.path.join('checkpoints', model_name, '_'.join(tasks))
 
 def get_last_file(dir_path: str) -> str:
     files = [os.path.join(dir_path,fname) for fname in os.listdir(dir_path)]
@@ -40,8 +40,6 @@ def get_tokenizer() -> PreTrainedTokenizer:
 
 def get_device() -> Any:
     # will use GPU whenever it's available
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
     return torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 
@@ -82,8 +80,7 @@ def train(args):
     configs = get_config(args.config)
     config = configs[0]
     torch.set_float32_matmul_precision('medium')
-
-
+    
     with open(args.src) as src, open(DATASET_CONFIG_CACHE_PATH, 'wt+') as dst:
         dataset_configs = json.load(src)
         json.dump(dataset_configs, dst)
@@ -91,17 +88,19 @@ def train(args):
     assert dataset_configs is not None
 
     # initialize wandb
+
     if args.wnb:
         wandb.login()
-        wandb.init(project="toygpt", config={
+        wandb.init(project="mlm_clm", config={
             "batch_size": args.batch,
             "learning_rate": args.lr,
             **config
         })
-        logger = WandbLogger(name='toygpt',version='0.1.0',log_model="all")
+        logger = WandbLogger(name='mlm_clm',version='0.1.0',log_model="all")
     else:
         logger = TensorBoardLogger('tf_logs')
     
+
     
     tokenizer: PreTrainedTokenizer = get_tokenizer()
     vocab_size = len(tokenizer)
@@ -116,7 +115,7 @@ def train(args):
                                             columns=[
                                                 dataset['column'] for dataset in dataset_configs
                                             ],
-                                            tasks=['CLM'],
+                                            tasks=args.tasks,
                                             cache_dir=args.cache,
                                             max_length=config['block_size'], 
                                             num_proc=cpu_count,
@@ -132,9 +131,9 @@ def train(args):
                       p_dropout=0.1, weight_decay=args.wd, lr=args.lr, batch=args.batch, 
                       **config)
 
-    trainer = L.Trainer(max_epochs=1, log_every_n_steps=args.batch, precision=args.precision, max_steps=train_steps, callbacks=[
+    trainer = L.Trainer(max_epochs=1,  precision=args.precision, max_steps=train_steps, callbacks=[
         EarlyStopping(monitor='val_loss', mode='min', patience=10),
-        ModelCheckpoint(get_checkpoint_path(model.__class__.__name__), monitor='val_loss', mode='min',filename='model-offset=0-{step}-{val_loss:.3f}', save_top_k=2, save_last=True)
+        ModelCheckpoint(get_checkpoint_path(model.__class__.__name__, args.tasks), monitor='val_loss', mode='min',filename='model-offset=0-{step}-{val_loss:.3f}', save_top_k=2, save_last=True)
     ], val_check_interval=0.01, logger=logger)
 
     trainer.fit(model, 
@@ -145,7 +144,6 @@ def train(args):
 
 def process(args):
     config = get_config(args.config)
-
     with open(args.src) as src:
         dataset_configs = json.load(src)
     
@@ -161,7 +159,7 @@ def process(args):
                                             columns=[
                                                 dataset['column'] for dataset in dataset_configs
                                             ],
-                                            tasks=['CLM'],
+                                            tasks=args.tasks,
                                             cache_dir=args.cache, 
                                             num_proc=cpu_count,
                                             max_length=config['block_size'], 
@@ -176,17 +174,17 @@ def resume(args):
     print(f"training will be performed on {device}")
     
     torch.set_float32_matmul_precision('medium')
-    last_ckpt_name = get_last_file(get_checkpoint_path(ToyGPT.__name__))
+    last_ckpt_name = get_last_file(get_checkpoint_path(ToyGPT.__name__, args.tasks))
     step_offset = get_steps(last_ckpt_name)
     model = ToyGPT.load_from_checkpoint(last_ckpt_name, device=device)
-
+    
     with open(DATASET_CONFIG_CACHE_PATH) as src:
         dataset_configs = json.load(src)
     assert dataset_configs is not None
     
     if args.wnb:
-        wandb.init(project="toygpt")
-        logger = WandbLogger(name='toygpt',version='0.1.0',log_model="all")
+        wandb.init(project="mlm_clm")
+        logger = WandbLogger(name='mlm_clm',version='0.1.0',log_model="all")
     else:
         logger = TensorBoardLogger('tf_logs')
 
@@ -199,7 +197,7 @@ def resume(args):
     
     print(f"resusmed state : {last_ckpt_name}  (steps: {step_offset})")
     print(f"hparam: \n {model.hparams})")
-    
+
     cpu_count = (os.cpu_count() - 1)
     dataset = HFCollectionMultiTaskDataModule(tokenizer, 
                                             paths=[dataset['name'] for dataset in dataset_configs],
@@ -209,7 +207,7 @@ def resume(args):
                                             columns=[
                                                 dataset['column'] for dataset in dataset_configs
                                             ],
-                                            tasks=['CLM'],
+                                            tasks=args.tasks,
                                             cache_dir=args.cache, 
                                             max_length=block_size, 
                                             num_proc=cpu_count,
@@ -218,9 +216,9 @@ def resume(args):
     dataset.prepare_data()
     train_steps, _ = dataset.setup()
     print(f'total train steps : {train_steps}')
-    trainer = L.Trainer(max_epochs=1, max_steps=train_steps, log_every_n_steps=batch_size, precision=args.precision, callbacks=[
+    trainer = L.Trainer(max_epochs=1, max_steps=train_steps, precision=args.precision, callbacks=[
         EarlyStopping(monitor='val_loss', mode='min', patience=10),
-        ModelCheckpoint(get_checkpoint_path(model.__class__.__name__), monitor='val_loss', mode='min',filename=f"model-offset={step_offset}" + '-{step}-{val_loss:.3f}', save_top_k=2, save_last=True)
+        ModelCheckpoint(get_checkpoint_path(model.__class__.__name__, args.tasks), monitor='val_loss', mode='min',filename=f"model-offset={step_offset}" + '-{step}-{val_loss:.3f}', save_top_k=2, save_last=True)
     ],val_check_interval=0.01, logger=logger)
     trainer.fit(model, train_dataloaders=dataset.train_dataloader(), val_dataloaders=dataset.val_dataloader(), ckpt_path='last')
     if args.wnb:
@@ -238,7 +236,7 @@ def generate(args):
     device = get_device()
     tokenizer = get_tokenizer()
     if args.model is None:
-        model_checkpoint = get_last_file(get_checkpoint_path(ToyGPT.__name__))
+        model_checkpoint = get_last_file(get_checkpoint_path(ToyGPT.__name__, args.tasks))
     else:
         model_checkpoint = args.model
     model = ToyGPT.load_from_checkpoint(model_checkpoint, device=device)
@@ -282,6 +280,13 @@ if __name__ == '__main__':
     train_parser.add_argument('-p', '--precision', type=str, default='32-true', help='training precision option')
     train_parser.add_argument('-w', '--wnb', type=bool, default=False, help='wandb logging')
     train_parser.add_argument('-s', '--src', type=str, default='datasets.json', help='dataset config file')
+    train_parser.add_argument('-t', '--tasks', choices=['CLM', 'MLM'], nargs='+', default=['CLM'], help="""Specifies the training task(s) to perform. Choose 'CLM' for Causal Language Modeling,
+                              'MLM' for Masked Language Modeling, or both. Causal Language Modeling (CLM) trains the model to predict 
+                              the next token in a sequence, useful for generating coherent text. Masked Language Modeling (MLM) trains 
+                              the model to predict masked (hidden) tokens within a sequence, enhancing understanding of context and 
+                              sentence structure. Specifying both tasks (default) initiates a composite training regime that may 
+                              improve overall model performance but requires more computational resources. Use this option to tailor 
+                              the training process to specific model requirements or research objectives.""")
 
     resume_parser = sub_parser.add_parser('resume', help='resume training')
     resume_parser.add_argument('-i', '--ckpt', required=False, default=None)
@@ -289,11 +294,25 @@ if __name__ == '__main__':
     resume_parser.add_argument('-w', '--wnb', type=bool, default=False, help='wandb logging')
     resume_parser.add_argument('-p', '--precision', type=str, default='32-true', help='training precision option')
     resume_parser.add_argument('-x', '--cache', type=str, help='path to store local training dataset')
+    resume_parser.add_argument('-t', '--tasks', choices=['CLM', 'MLM'], nargs='+', default=['CLM', 'MLM'], help="""Specifies the training task(s) to perform. Choose 'CLM' for Causal Language Modeling,
+                              'MLM' for Masked Language Modeling, or both. Causal Language Modeling (CLM) trains the model to predict 
+                              the next token in a sequence, useful for generating coherent text. Masked Language Modeling (MLM) trains 
+                              the model to predict masked (hidden) tokens within a sequence, enhancing understanding of context and 
+                              sentence structure. Specifying both tasks (default) initiates a composite training regime that may 
+                              improve overall model performance but requires more computational resources. Use this option to tailor 
+                              the training process to specific model requirements or research objectives.""")
     resume_parser.set_defaults(func=resume)
 
     generate_parser = sub_parser.add_parser("generate", help='generate text using model')
     generate_parser.add_argument('-p', '--prompt', type=str, required=True)
     generate_parser.add_argument('-m', '--model', type=str, default=None)
+    generate_parser.add_argument('-t', '--tasks', choices=['CLM', 'MLM'], nargs='+', default=['CLM', 'MLM'], help="""Specifies the training task(s) to perform. Choose 'CLM' for Causal Language Modeling,
+                              'MLM' for Masked Language Modeling, or both. Causal Language Modeling (CLM) trains the model to predict 
+                              the next token in a sequence, useful for generating coherent text. Masked Language Modeling (MLM) trains 
+                              the model to predict masked (hidden) tokens within a sequence, enhancing understanding of context and 
+                              sentence structure. Specifying both tasks (default) initiates a composite training regime that may 
+                              improve overall model performance but requires more computational resources. Use this option to tailor 
+                              the training process to specific model requirements or research objectives.""")
     generate_parser.add_argument('-r', '--repeat_penalty', type=float, default=1.3)
     generate_parser.set_defaults(func=generate)
 
